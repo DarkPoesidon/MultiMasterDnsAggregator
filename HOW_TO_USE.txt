@@ -1,0 +1,567 @@
+================================================================================
+  MasterDNS MULTIPATH AGGREGATOR  -  Complete Beginner's Guide
+  Repository: https://github.com/DarkPoesidon/MultiMasterDnsAggregator
+================================================================================
+
+  No technical knowledge needed.  Read this top to bottom.
+  Every command is written out exactly as you need to type it.
+
+================================================================================
+  WHAT DOES THIS DO? (Plain English)
+================================================================================
+
+  This system hides your internet traffic inside normal-looking DNS requests
+  (the kind every computer sends thousands of times a day).  Firewalls and
+  censorship systems almost never block DNS because that would break the
+  entire internet.
+
+  The "Aggregator" part bonds FIVE of these tunnels together at the same time,
+  giving you more speed and reliability.  If one tunnel gets slow or blocked,
+  the other four keep working.
+
+  Think of it like five water pipes instead of one.
+
+
+================================================================================
+  THE THREE PIECES YOU NEED
+================================================================================
+
+  PIECE 1 – 5 x DNS VPN Servers (5 cheap VPS machines)
+  -------------------------------------------------------
+  These are cheap Linux cloud servers, one per tunnel.
+  Each one runs the MasterDnsVPN server software.
+  You need one domain name (or subdomain) pointing at each one.
+
+  PIECE 2 – 1 x Aggregator VPS (one Linux cloud server)
+  -------------------------------------------------------
+  This is the "hub" that collects traffic from all 5 DNS servers
+  and sends it to the real website.
+  It runs the  masterdns-agg-server  program.
+
+  PIECE 3 – Your own computer (Windows, Linux or Mac)
+  -----------------------------------------------------
+  You run:
+    - 5 copies of masterdnsvpn-client  (one per tunnel)
+    - 1 copy of masterdns-agg          (the aggregator client)
+  Your browser connects through masterdns-agg as a SOCKS5 proxy.
+
+
+  THE FULL PICTURE:
+
+  Your PC
+    |-- masterdnsvpn-client (tunnel 1 :18001) --> DNS VPN Server 1 --+
+    |-- masterdnsvpn-client (tunnel 2 :18002) --> DNS VPN Server 2 --+
+    |-- masterdnsvpn-client (tunnel 3 :18003) --> DNS VPN Server 3 --+--> Aggregator VPS --> Internet
+    |-- masterdnsvpn-client (tunnel 4 :18004) --> DNS VPN Server 4 --+
+    |-- masterdnsvpn-client (tunnel 5 :18005) --> DNS VPN Server 5 --+
+    |
+    +-- masterdns-agg (SOCKS5 on 127.0.0.1:19000)
+    |
+  Browser (proxy = 127.0.0.1:19000)
+
+
+================================================================================
+  WHAT YOU NEED BEFORE YOU START
+================================================================================
+
+  [ ] 5 small Linux VPS machines (Hetzner, DigitalOcean, Vultr, etc.)
+       - Ubuntu 22.04 recommended
+       - Cheapest plan is fine (1 vCPU, 1 GB RAM)
+       - Port 53 UDP must be open (most providers allow this)
+
+  [ ] 1 more Linux VPS for the Aggregator
+       - Port 9000 TCP must be open
+
+  [ ] 5 domain names (or 5 subdomains of one domain)
+       - Example: t1.mydomain.com, t2.mydomain.com ... t5.mydomain.com
+       - Each one must point (DNS A record) at the matching server IP
+
+  [ ] Go 1.22 or later installed on your PC AND on each server
+       - Download from: https://go.dev/dl/
+
+  [ ] Git installed on your PC AND on each server
+       - Download from: https://git-scm.com/downloads
+
+
+================================================================================
+  PART A:  SET UP THE AGGREGATOR VPS  (do this FIRST)
+================================================================================
+
+  The one-click installer handles everything for you.
+
+  Step A1 – Log in to your Aggregator VPS
+  -----------------------------------------
+  Open a terminal and SSH in:
+
+      ssh root@<YOUR_AGGREGATOR_VPS_IP>
+
+  (Replace <YOUR_AGGREGATOR_VPS_IP> with the actual IP address.)
+
+
+  Step A2 – Run the one-click installer
+  ---------------------------------------
+  Paste this single line and press Enter:
+
+      bash <(curl -fsSL https://raw.githubusercontent.com/DarkPoesidon/MultiMasterDnsAggregator/main/install.sh)
+
+  OR if you prefer wget:
+
+      bash <(wget -qO- https://raw.githubusercontent.com/DarkPoesidon/MultiMasterDnsAggregator/main/install.sh)
+
+  The script will:
+    - Install all needed software automatically
+    - Download and install Go if needed
+    - Clone this repository
+    - Build the server binary
+    - Open port 9000 in the firewall
+    - Create a background service that starts automatically on reboot
+
+  When it asks:
+    "Enter the port for the Aggregator server [Default: 9000]:"
+    --> Just press Enter to use port 9000 (recommended).
+
+  When it finishes you will see a green success box showing your server IP
+  and port.  WRITE DOWN THAT IP ADDRESS.  You will need it in Part C.
+
+
+  Step A3 – Verify the server is running
+  ----------------------------------------
+  Run this command on the Aggregator VPS:
+
+      systemctl status masterdns-aggregator
+
+  You should see:   Active: active (running)
+
+  To watch live logs:
+
+      journalctl -u masterdns-aggregator -f
+
+  Press Ctrl+C to stop watching logs.
+
+
+================================================================================
+  PART B:  SET UP THE 5 DNS VPN SERVERS
+================================================================================
+
+  Repeat ALL steps in this section 5 times.
+  One time for each server (Server 1 through Server 5).
+  Keep track of which domain belongs to which server.
+
+  ---------------------------------------------------------------------------
+  Do these steps on each server (SSH into it first):
+      ssh root@<SERVER_X_IP>
+  ---------------------------------------------------------------------------
+
+  Step B1 – Install Go
+  ----------------------
+      wget https://go.dev/dl/go1.22.4.linux-amd64.tar.gz
+      tar -C /usr/local -xzf go1.22.4.linux-amd64.tar.gz
+      echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+      source ~/.bashrc
+      go version
+
+  You should see: go version go1.22.4 linux/amd64
+
+
+  Step B2 – Download the MasterDnsVPN server software
+  ------------------------------------------------------
+      git clone https://github.com/masterking32/MasterDnsVPN.git
+      cd MasterDnsVPN
+
+
+  Step B3 – Create the server config file
+  -----------------------------------------
+      cp server_config.toml.simple server_config.toml
+      nano server_config.toml
+
+  Change these lines (use your own values):
+
+      DOMAIN = ["tX.yourdomain.com"]       <-- change X to 1, 2, 3, 4, or 5
+      PROTOCOL_TYPE = "SOCKS5"
+      DATA_ENCRYPTION_METHOD = 2
+      ENCRYPTION_KEY = "pick-any-long-random-password"
+
+  IMPORTANT: Use the SAME ENCRYPTION_KEY on ALL 5 servers and all clients.
+
+  Save and exit: press Ctrl+X, then Y, then Enter.
+
+
+  Step B4 – Open port 53
+  ------------------------
+      ufw allow 53/udp
+      ufw allow 22/tcp
+      ufw enable
+
+  If your VPS provider has a separate firewall panel, also open UDP port 53
+  there (it is sometimes called "Custom UDP" rule).
+
+
+  Step B5 – Build the server
+  ----------------------------
+      go build -o masterdnsvpn-server ./cmd/server/
+
+
+  Step B6 – Run the server as a background service
+  --------------------------------------------------
+  Create a systemd service so it keeps running after you close SSH:
+
+      cat > /etc/systemd/system/masterdnsvpn.service << 'EOF'
+      [Unit]
+      Description=MasterDnsVPN Server
+      After=network.target
+
+      [Service]
+      Type=simple
+      WorkingDirectory=/root/MasterDnsVPN
+      ExecStart=/root/MasterDnsVPN/masterdnsvpn-server
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+      EOF
+
+      systemctl daemon-reload
+      systemctl enable --now masterdnsvpn
+      systemctl status masterdnsvpn
+
+  You should see: Active: active (running)
+
+  ---------------------------------------------------------------------------
+  Repeat Steps B1-B6 for Server 2, 3, 4, and 5.
+  Each time change DOMAIN to the matching subdomain.
+  ---------------------------------------------------------------------------
+
+
+================================================================================
+  PART C:  SET UP YOUR OWN COMPUTER (the client side)
+================================================================================
+
+  All of these steps run on YOUR personal computer, not on any server.
+
+
+  Step C1 – Install Go on your computer
+  ----------------------------------------
+  WINDOWS:
+    1. Go to https://go.dev/dl/
+    2. Download the .msi file (e.g. go1.22.4.windows-amd64.msi)
+    3. Run the installer, click Next through everything
+    4. Open a NEW Command Prompt and type:   go version
+       You should see:  go version go1.22.4 windows/amd64
+
+  LINUX/MAC:
+    wget https://go.dev/dl/go1.22.4.linux-amd64.tar.gz
+    tar -C /usr/local -xzf go1.22.4.linux-amd64.tar.gz
+    echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+    source ~/.bashrc
+    go version
+
+
+  Step C2 – Download both projects
+  ----------------------------------
+  WINDOWS (PowerShell or Command Prompt):
+    git clone https://github.com/masterking32/MasterDnsVPN.git
+    git clone https://github.com/DarkPoesidon/MultiMasterDnsAggregator.git
+
+  LINUX/MAC:
+    git clone https://github.com/masterking32/MasterDnsVPN.git
+    git clone https://github.com/DarkPoesidon/MultiMasterDnsAggregator.git
+
+
+  Step C3 – Build the DNS tunnel client
+  ----------------------------------------
+  WINDOWS:
+    cd MasterDnsVPN
+    go build -o masterdnsvpn-client.exe ./cmd/client/
+    cd ..
+
+  LINUX/MAC:
+    cd MasterDnsVPN
+    go build -o masterdnsvpn-client ./cmd/client/
+    cd ..
+
+
+  Step C4 – Build the Aggregator client
+  ----------------------------------------
+  WINDOWS:
+    cd MultiMasterDnsAggregator
+    go build -o masterdns-agg.exe ./cmd/masterdns-agg/
+    cd ..
+
+  LINUX/MAC:
+    cd MultiMasterDnsAggregator
+    go build -o masterdns-agg ./cmd/masterdns-agg/
+    cd ..
+
+
+  Step C5 – Create 5 tunnel config files
+  ----------------------------------------
+  Go into the MasterDnsVPN folder:
+
+    cd MasterDnsVPN
+
+  Copy the sample config 5 times:
+
+  WINDOWS (PowerShell):
+    for ($i = 1; $i -le 5; $i++) { Copy-Item client_config.toml.simple "client${i}.toml" }
+
+  LINUX/MAC:
+    for i in 1 2 3 4 5; do cp client_config.toml.simple client${i}.toml; done
+
+  Now edit each file in a text editor.
+  The only lines you need to change in each file:
+
+  ------ client1.toml ------
+    DOMAINS     = ["t1.yourdomain.com"]    <-- your Server 1 domain
+    LISTEN_PORT = 18001
+    DATA_ENCRYPTION_METHOD = 2
+    ENCRYPTION_KEY = "pick-any-long-random-password"   <-- same key as server
+
+  ------ client2.toml ------
+    DOMAINS     = ["t2.yourdomain.com"]
+    LISTEN_PORT = 18002
+    DATA_ENCRYPTION_METHOD = 2
+    ENCRYPTION_KEY = "pick-any-long-random-password"
+
+  ------ client3.toml ------
+    DOMAINS     = ["t3.yourdomain.com"]
+    LISTEN_PORT = 18003
+    DATA_ENCRYPTION_METHOD = 2
+    ENCRYPTION_KEY = "pick-any-long-random-password"
+
+  ------ client4.toml ------
+    DOMAINS     = ["t4.yourdomain.com"]
+    LISTEN_PORT = 18004
+    DATA_ENCRYPTION_METHOD = 2
+    ENCRYPTION_KEY = "pick-any-long-random-password"
+
+  ------ client5.toml ------
+    DOMAINS     = ["t5.yourdomain.com"]
+    LISTEN_PORT = 18005
+    DATA_ENCRYPTION_METHOD = 2
+    ENCRYPTION_KEY = "pick-any-long-random-password"
+
+  IMPORTANT: The ENCRYPTION_KEY must be IDENTICAL in all config files
+             and must MATCH the key you used on the servers in Part B.
+
+
+================================================================================
+  PART D:  RUN EVERYTHING
+================================================================================
+
+  You will need 6 terminal windows open at the same time on your computer.
+
+  -----------------------------------------------------------------------
+  Terminals 1 through 5 — The 5 DNS tunnel clients
+  -----------------------------------------------------------------------
+  Open a new terminal window for each one.
+  Make sure you are in the   MasterDnsVPN   folder.
+
+  WINDOWS (PowerShell):
+    Terminal 1:   .\masterdnsvpn-client.exe -config client1.toml
+    Terminal 2:   .\masterdnsvpn-client.exe -config client2.toml
+    Terminal 3:   .\masterdnsvpn-client.exe -config client3.toml
+    Terminal 4:   .\masterdnsvpn-client.exe -config client4.toml
+    Terminal 5:   .\masterdnsvpn-client.exe -config client5.toml
+
+  LINUX/MAC:
+    Terminal 1:   ./masterdnsvpn-client -config client1.toml
+    Terminal 2:   ./masterdnsvpn-client -config client2.toml
+    Terminal 3:   ./masterdnsvpn-client -config client3.toml
+    Terminal 4:   ./masterdnsvpn-client -config client4.toml
+    Terminal 5:   ./masterdnsvpn-client -config client5.toml
+
+  Each one should print something like:
+      [Client] SOCKS5 proxy listening on 127.0.0.1:18001
+
+  Wait until ALL FIVE are running before the next step.
+
+  -----------------------------------------------------------------------
+  Terminal 6 — The Aggregator Client
+  -----------------------------------------------------------------------
+  Open one more terminal and go into the MultiMasterDnsAggregator folder.
+  Replace  1.2.3.4  below with your ACTUAL Aggregator VPS IP address.
+
+  WINDOWS (PowerShell):
+    cd MultiMasterDnsAggregator
+    .\masterdns-agg.exe `
+      -listen 127.0.0.1:19000 `
+      -agg    1.2.3.4:9000 `
+      -t1     127.0.0.1:18001 `
+      -t2     127.0.0.1:18002 `
+      -t3     127.0.0.1:18003 `
+      -t4     127.0.0.1:18004 `
+      -t5     127.0.0.1:18005
+
+  LINUX/MAC:
+    cd MultiMasterDnsAggregator
+    ./masterdns-agg \
+      -listen 127.0.0.1:19000 \
+      -agg    1.2.3.4:9000 \
+      -t1     127.0.0.1:18001 \
+      -t2     127.0.0.1:18002 \
+      -t3     127.0.0.1:18003 \
+      -t4     127.0.0.1:18004 \
+      -t5     127.0.0.1:18005
+
+  You should see:
+      [masterdns-agg] INFO  Listen    : 127.0.0.1:19000
+      [masterdns-agg] INFO  Aggregator: 1.2.3.4:9000
+      [masterdns-agg] INFO  Tunnels   :
+      [masterdns-agg] INFO    tunnel-1  → 127.0.0.1:18001 (weight 1)
+      ...
+      [MultipathDispatcher] SOCKS5 listening on 127.0.0.1:19000
+
+
+================================================================================
+  PART E:  CONFIGURE YOUR BROWSER
+================================================================================
+
+  The Aggregator Client is now running a SOCKS5 proxy on your computer at:
+
+      Address:  127.0.0.1
+      Port:     19000
+
+  Point your browser at it:
+
+  -----------------------------------------------------------------------
+  FIREFOX  (easiest)
+  -----------------------------------------------------------------------
+  1. Open Firefox
+  2. Click the hamburger menu (three lines top-right) --> Settings
+  3. Scroll to the bottom --> click "Settings..." next to Network Settings
+  4. Select "Manual proxy configuration"
+  5. SOCKS Host:  127.0.0.1     Port:  19000
+  6. Select SOCKS v5
+  7. CHECK the box: "Proxy DNS when using SOCKS v5"   <-- important!
+  8. Click OK
+
+  -----------------------------------------------------------------------
+  CHROME / EDGE  (use the SwitchyOmega extension)
+  -----------------------------------------------------------------------
+  1. Install "Proxy SwitchyOmega" from the Chrome Web Store
+  2. Open extension options
+  3. New Profile --> name it "MasterDNS"
+  4. Protocol: SOCKS5    Server: 127.0.0.1    Port: 19000
+  5. Save
+  6. Click the extension icon in the toolbar --> select "MasterDNS"
+
+  -----------------------------------------------------------------------
+  TEST IT WORKS
+  -----------------------------------------------------------------------
+  Open your browser (with proxy set) and go to:
+
+      https://ifconfig.me
+
+  The IP address shown should be your AGGREGATOR VPS IP, not your home IP.
+  If it shows your Aggregator IP — congratulations, everything is working!
+
+
+================================================================================
+  PART F:  TROUBLESHOOTING
+================================================================================
+
+  PROBLEM: Browser says "Connection refused" or proxy isn't working
+  -----------------------------------------------------------------
+  --> Check that Terminal 6 (masterdns-agg) is still running.
+  --> Check that the proxy settings in your browser show 127.0.0.1:19000
+      and SOCKS v5 (not HTTP).
+
+  PROBLEM: Pages are extremely slow
+  -----------------------------------
+  --> Make sure all 5 tunnel client terminals (1-5) are running.
+  --> Check the Aggregator VPS logs:
+        journalctl -u masterdns-aggregator -f
+      Look for "bearer X send failed" messages.
+  --> Verify port 9000/tcp is open on the Aggregator VPS:
+        ufw status      (should show 9000/tcp ALLOW)
+
+  PROBLEM: "SYN dispatch failed" in Terminal 6 logs
+  ---------------------------------------------------
+  --> The Aggregator client cannot reach the Aggregator Server.
+  --> Check: is the IP address after -agg correct?
+  --> On the Aggregator VPS, verify it is running:
+        systemctl status masterdns-aggregator
+  --> Verify port 9000 is open:
+        ufw status
+
+  PROBLEM: Tunnel clients exit right away
+  ----------------------------------------
+  --> Open the clientX.toml file and double-check:
+      - DOMAINS matches the domain the server uses
+      - ENCRYPTION_KEY is exactly the same on client and server
+      - DATA_ENCRYPTION_METHOD is the same on both sides
+
+  PROBLEM: Port 53 already in use on the server (Linux)
+  -------------------------------------------------------
+  Modern Ubuntu has a service that blocks port 53.  Fix:
+      systemctl stop systemd-resolved
+      systemctl disable systemd-resolved
+      rm /etc/resolv.conf
+      echo "nameserver 1.1.1.1" > /etc/resolv.conf
+
+
+================================================================================
+  QUICK REFERENCE  –  SERVER COMMANDS
+================================================================================
+
+  On the AGGREGATOR VPS:
+
+    Check status:        systemctl status masterdns-aggregator
+    See live logs:       journalctl -u masterdns-aggregator -f
+    Restart:             systemctl restart masterdns-aggregator
+    Stop:                systemctl stop masterdns-aggregator
+    Update to latest:    bash <(curl -fsSL https://raw.githubusercontent.com/DarkPoesidon/MultiMasterDnsAggregator/main/install.sh)
+
+  On each DNS VPN SERVER:
+
+    Check status:        systemctl status masterdnsvpn
+    See live logs:       journalctl -u masterdnsvpn -f
+    Restart:             systemctl restart masterdnsvpn
+
+
+================================================================================
+  QUICK REFERENCE  –  ALL CLIENT FLAGS
+================================================================================
+
+  masterdns-agg  (Aggregator Client – runs on YOUR computer)
+
+    -listen    Local address your browser connects to  (default 127.0.0.1:19000)
+    -agg       Aggregator VPS address                  (example: 1.2.3.4:9000)
+    -chunk     Packet size in bytes                    (default 1024 — leave it)
+    -t1        DNS tunnel 1 SOCKS5 address             (default 127.0.0.1:18001)
+    -t2        DNS tunnel 2 SOCKS5 address             (default 127.0.0.1:18002)
+    -t3        DNS tunnel 3 SOCKS5 address             (default 127.0.0.1:18003)
+    -t4        DNS tunnel 4 SOCKS5 address             (default 127.0.0.1:18004)
+    -t5        DNS tunnel 5 SOCKS5 address             (default 127.0.0.1:18005)
+
+  masterdns-agg-server  (Aggregator Server – runs on the Aggregator VPS)
+
+    -listen    Address to accept connections on        (default :9000)
+    -chunk     Response packet size in bytes           (default 4096 — leave it)
+    -streams   Max simultaneous connections (0 = no limit)
+
+
+================================================================================
+  SUMMARY CHECKLIST
+================================================================================
+
+  SERVER SIDE (one time setup, runs forever):
+  [ ] 5 DNS VPN server VPS machines running masterdnsvpn-server
+  [ ] 1 Aggregator VPS running masterdns-agg-server (installed via install.sh)
+  [ ] 5 domain names pointing at each DNS VPN server
+  [ ] Port 53/UDP open on all 5 DNS VPN servers
+  [ ] Port 9000/TCP open on the Aggregator VPS
+  [ ] Same ENCRYPTION_KEY used everywhere
+
+  CLIENT SIDE (run each time you want to use it):
+  [ ] 5 terminal windows: masterdnsvpn-client -config clientX.toml
+  [ ] 1 terminal window:  masterdns-agg -listen 127.0.0.1:19000 -agg <AGG_IP>:9000
+  [ ] Browser SOCKS5 proxy set to 127.0.0.1:19000
+  [ ] ifconfig.me shows Aggregator VPS IP = you are online!
+
+
+================================================================================
+  Need help?  Open an issue at:
+  https://github.com/DarkPoesidon/MultiMasterDnsAggregator/issues
+================================================================================
