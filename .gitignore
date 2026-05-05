@@ -1,0 +1,26 @@
+# Binaries
+masterdns-agg-server
+masterdns-agg
+masterdns-agg-server.exe
+masterdns-agg.exe
+*.exe
+*.test
+
+# Go build cache
+/vendor/
+
+# Module download cache
+/go.sum.bak
+
+# OS artefacts
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Build output directory
+/bin/
+/dist/
