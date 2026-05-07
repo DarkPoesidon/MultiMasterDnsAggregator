@@ -90,14 +90,15 @@ func (r *BearerRegistry) Pick() (*InboundBearer, error) {
 // enabling "sticky" response routing.  Falls back to Pick() if not found.
 func (r *BearerRegistry) PickFor(streamID uint32) (*InboundBearer, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	for _, b := range r.bearers {
 		if !b.IsClosed() && b.HasStream(streamID) {
+			r.mu.RUnlock()
 			return b, nil
 		}
 	}
+	r.mu.RUnlock()
 	// Not found on any specific bearer – fall back to round-robin.
+	// Must release lock BEFORE calling Pick() to avoid deadlock.
 	return r.Pick()
 }
 
