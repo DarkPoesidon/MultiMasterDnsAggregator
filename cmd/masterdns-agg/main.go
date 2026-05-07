@@ -23,7 +23,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -31,7 +30,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/DarkPoesidon/MultiMasterDnsAggregator/internal/multipath"
+	"github.com/DarkPoesidon/MultiMasterDnsAggregator/internal/appcontrol"
 )
 
 func main() {
@@ -53,62 +52,31 @@ func main() {
 	t5 := flag.String("t5", "127.0.0.1:18005", "DNS tunnel 5 SOCKS5 addr")
 	flag.Parse()
 
-	// ── Build configuration ──────────────────────────────────────────────────
-	cfg := multipath.MultipathConfig{
-		ListenAddr:          *listenAddr,
-		AggregatorAddr:      *aggAddr,
-		ChunkSize:           *chunkSize,
-		DialTimeout:         *dialTimeout,
-		ReconnectDelay:      *reconnDelay,
-		ReadBufferSize:      32 * 1024,
-		InboundChannelDepth: 4096,
-		DispatchRetries:     0,
-		Tunnels: []multipath.TunnelEndpoint{
-			{SOCKS5Addr: *t1, Label: "tunnel-1", Weight: 1},
-			{SOCKS5Addr: *t2, Label: "tunnel-2", Weight: 1},
-			{SOCKS5Addr: *t3, Label: "tunnel-3", Weight: 1},
-			{SOCKS5Addr: *t4, Label: "tunnel-4", Weight: 1},
-			{SOCKS5Addr: *t5, Label: "tunnel-5", Weight: 1},
-		},
+	cfg := appcontrol.DefaultAppConfig()
+	cfg.ListenAddr = *listenAddr
+	cfg.AggregatorAddr = *aggAddr
+	cfg.ChunkSize = *chunkSize
+	cfg.DialTimeoutSec = int((*dialTimeout).Seconds())
+	cfg.ReconnectSec = int((*reconnDelay).Seconds())
+	cfg.InboundDepth = 4096
+	cfg.Tunnels = []appcontrol.TunnelConfig{
+		{SOCKS5Addr: *t1, Label: "tunnel-1", Weight: 1},
+		{SOCKS5Addr: *t2, Label: "tunnel-2", Weight: 1},
+		{SOCKS5Addr: *t3, Label: "tunnel-3", Weight: 1},
+		{SOCKS5Addr: *t4, Label: "tunnel-4", Weight: 1},
+		{SOCKS5Addr: *t5, Label: "tunnel-5", Weight: 1},
 	}
 
-	// ── Logger ───────────────────────────────────────────────────────────────
-	log := multipath.NewStdLogger("masterdns-agg")
-
-	log.Infof("============================================================")
-	log.Infof("MasterDNS Multipath Aggregator – Client")
-	log.Infof("Listen    : %s", cfg.ListenAddr)
-	log.Infof("Aggregator: %s", cfg.AggregatorAddr)
-	log.Infof("Tunnels   :")
-	for _, t := range cfg.Tunnels {
-		w := t.Weight
-		if w < 1 {
-			w = 1
-		}
-		log.Infof("  %-12s → %s (weight %d)", t.Label, t.SOCKS5Addr, w)
-	}
-	log.Infof("ChunkSize : %d bytes", cfg.ChunkSize)
-	log.Infof("============================================================")
-
-	// ── Context wired to OS signals ──────────────────────────────────────────
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	// ── Manager ──────────────────────────────────────────────────────────────
-	mgr := multipath.NewMultipathManager(cfg, log)
-	mgr.Start(ctx)
-	defer func() {
-		mgr.Stop()
-		log.Infof("MultipathManager stopped")
-	}()
-
-	// ── Dispatcher ───────────────────────────────────────────────────────────
-	disp := multipath.NewMultipathDispatcher(cfg, mgr, log)
-
-	if err := disp.Run(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "dispatcher error: %v\n", err)
+	runtime := appcontrol.NewRuntime(cfg)
+	if err := runtime.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to start: %v\n", err)
 		os.Exit(1)
 	}
+	defer runtime.Stop()
 
-	log.Infof("shutdown complete")
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	<-sigCh
+
+	runtime.Stop()
 }
