@@ -61,7 +61,9 @@ MultiMasterDnsAggregator/
 ├── cmd/
 │   ├── masterdns-agg-server/   # ← Server binary entry point (deploy to VPS)
 │   │   └── main.go
-│   └── masterdns-agg/          # ← Client binary entry point (run on your machine)
+│   ├── masterdns-agg/          # ← Client binary entry point (run on your machine)
+│   │   └── main.go
+│   └── masterdns-agg-app/      # ← Windows/Android app target (HTTP UI + runtime control)
 │       └── main.go
 ├── internal/
 │   ├── aggregator/             # Server-side: bearer management, stream routing,
@@ -111,6 +113,44 @@ go build -o masterdns-agg-server ./cmd/masterdns-agg-server/
 
 ```bash
 go build -o masterdns-agg ./cmd/masterdns-agg/
+```
+
+### Build the Windows / Android app UI
+
+This repository now includes an app target at:
+
+```text
+./cmd/masterdns-agg-app
+```
+
+It uses the same multipath core, but adds a browser-based UI for:
+- start / stop
+- editing tunnel + server settings
+- status + logs
+- config import / export (JSON)
+
+Build for Windows:
+
+```bash
+GOOS=windows GOARCH=amd64 go build -o masterdns-agg-app.exe ./cmd/masterdns-agg-app
+```
+
+Build for Android (arm64):
+
+```bash
+GOOS=android GOARCH=arm64 go build -o masterdns-agg-app-android ./cmd/masterdns-agg-app
+```
+
+Run the app UI:
+
+```bash
+./masterdns-agg-app -ui-listen 127.0.0.1:19100
+```
+
+Then open:
+
+```text
+http://127.0.0.1:19100
 ```
 
 ---
