@@ -1,19 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/DarkPoesidon/MultiMasterDnsAggregator/internal/appcontrol"
 )
 
 type appServer struct {
-	mu      sync.Mutex
 	runtime *appcontrol.Runtime
 }
 
@@ -107,16 +106,11 @@ func (s *appServer) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	path := strings.TrimSpace(r.URL.Query().Get("path"))
-	if path == "" {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("path is required"))
-		return
-	}
-	if err := appcontrol.SaveConfig(path, s.runtime.Config()); err != nil {
+	if err := appcontrol.SaveConfig(s.runtime.Config()); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true})
+	writeJSON(w, map[string]any{"ok": true, "file": appcontrol.DefaultConfigFile})
 }
 
 func (s *appServer) handleLoadConfig(w http.ResponseWriter, r *http.Request) {
@@ -124,12 +118,7 @@ func (s *appServer) handleLoadConfig(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	path := strings.TrimSpace(r.URL.Query().Get("path"))
-	if path == "" {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("path is required"))
-		return
-	}
-	cfg, err := appcontrol.LoadConfig(path)
+	cfg, err := appcontrol.LoadConfig()
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
@@ -138,17 +127,31 @@ func (s *appServer) handleLoadConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true, "config": cfg})
+	writeJSON(w, map[string]any{
+		"ok":     true,
+		"config": cfg,
+		"file":   appcontrol.DefaultConfigFile,
+	})
 }
 
 func writeErr(w http.ResponseWriter, status int, err error) {
-	w.WriteHeader(status)
-	writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+	writeJSONWithStatus(w, status, map[string]any{"ok": false, "error": err.Error()})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
+	writeJSONWithStatus(w, http.StatusOK, v)
+}
+
+func writeJSONWithStatus(w http.ResponseWriter, status int, v any) {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+	w.WriteHeader(status)
+	_, _ = w.Write(buf.Bytes())
 }
 
 const indexHTML = `<!doctype html>
@@ -166,7 +169,7 @@ const indexHTML = `<!doctype html>
   </style>
 </head>
 <body>
-  <h2>MasterDNS Aggregator App (Windows/Android)</h2>
+  <h2>MasterDNS Aggregator App</h2>
   <div id="status">Loading...</div>
   <div class="toolbar">
     <button onclick="startApp()">Start</button>
@@ -185,7 +188,7 @@ const indexHTML = `<!doctype html>
   <div class="row"><label>Tunnel 3</label><input id="t3" /></div>
   <div class="row"><label>Tunnel 4</label><input id="t4" /></div>
   <div class="row"><label>Tunnel 5</label><input id="t5" /></div>
-  <div class="row"><label>Config Path</label><input id="cfgpath" value="masterdns-app-config.json" /></div>
+  <p>Config import/export file: <code>masterdns-app-config.json</code></p>
   <h3>Logs</h3>
   <textarea id="logs" readonly></textarea>
 <script>
@@ -209,7 +212,7 @@ function cfgFromUi(){return{
 }}
 function cfgToUi(c){
   q('listen').value=c.listen_addr||''; q('agg').value=c.aggregator_addr||'';
-  q('chunk').value=c.chunk_size||1024; q('dial').value=c.dial_timeout_sec||10; q('reconnect').value=c.reconnect_sec||3;
+  q('chunk').value=c.chunk_size||''; q('dial').value=c.dial_timeout_sec||''; q('reconnect').value=c.reconnect_sec||'';
   const t=c.tunnels||[];
   q('t1').value=t[0]?.socks5_addr||''; q('t2').value=t[1]?.socks5_addr||''; q('t3').value=t[2]?.socks5_addr||'';
   q('t4').value=t[3]?.socks5_addr||''; q('t5').value=t[4]?.socks5_addr||'';
@@ -224,8 +227,8 @@ async function refreshAll(){
 async function applyConfig(){await j('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfgFromUi())})}
 async function startApp(){try{await applyConfig();await j('/api/start',{method:'POST'});await refreshAll()}catch(e){alert(e.message)}}
 async function stopApp(){try{await j('/api/stop',{method:'POST'});await refreshAll()}catch(e){alert(e.message)}}
-async function saveConfig(){try{await applyConfig();await j('/api/config/save?path='+encodeURIComponent(q('cfgpath').value),{method:'POST'});alert('saved')}catch(e){alert(e.message)}}
-async function loadConfig(){try{const r=await j('/api/config/load?path='+encodeURIComponent(q('cfgpath').value),{method:'POST'});cfgToUi(r.config);await refreshAll()}catch(e){alert(e.message)}}
+async function saveConfig(){try{await applyConfig();await j('/api/config/save',{method:'POST'});alert('saved')}catch(e){alert(e.message)}}
+async function loadConfig(){try{const r=await j('/api/config/load',{method:'POST'});cfgToUi(r.config);await refreshAll()}catch(e){alert(e.message)}}
 setInterval(refreshAll,2000); refreshAll();
 </script>
 </body></html>`

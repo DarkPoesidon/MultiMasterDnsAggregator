@@ -27,6 +27,8 @@ type AppConfig struct {
 	Tunnels         []TunnelConfig `json:"tunnels"`
 }
 
+const DefaultConfigFile = "masterdns-app-config.json"
+
 func DefaultAppConfig() AppConfig {
 	base := multipath.DefaultConfig()
 	return AppConfig{
@@ -97,8 +99,8 @@ func (c AppConfig) ToMultipathConfig() multipath.MultipathConfig {
 	}
 }
 
-func LoadConfig(path string) (AppConfig, error) {
-	raw, err := os.ReadFile(path)
+func LoadConfig() (AppConfig, error) {
+	raw, err := os.ReadFile(DefaultConfigFile)
 	if err != nil {
 		return AppConfig{}, err
 	}
@@ -109,7 +111,7 @@ func LoadConfig(path string) (AppConfig, error) {
 	return cfg, cfg.Validate()
 }
 
-func SaveConfig(path string, cfg AppConfig) error {
+func SaveConfig(cfg AppConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -117,5 +119,5 @@ func SaveConfig(path string, cfg AppConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, raw, 0o644)
+	return os.WriteFile(DefaultConfigFile, raw, 0o600)
 }

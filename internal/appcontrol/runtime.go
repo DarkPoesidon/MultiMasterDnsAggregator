@@ -54,24 +54,23 @@ func (r *Runtime) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	mgr := multipath.NewMultipathManager(mpCfg, r.log)
 	disp := multipath.NewMultipathDispatcher(mpCfg, mgr, r.log)
+	r.lastErr = ""
 
 	mgr.Start(ctx)
 
 	go func() {
 		err := disp.Run(ctx)
-		if err == nil {
-			return
+		if err != nil {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			r.lastErr = err.Error()
 		}
-		r.mu.Lock()
-		defer r.mu.Unlock()
-		r.lastErr = err.Error()
 	}()
 
 	r.cancel = cancel
 	r.manager = mgr
 	r.dispatcher = disp
 	r.running = true
-	r.lastErr = ""
 	r.log.Infof("runtime started on %s", r.cfg.ListenAddr)
 
 	return nil
