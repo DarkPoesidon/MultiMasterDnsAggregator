@@ -40,7 +40,8 @@ func main() {
 
 func (s *appServer) handleIndex(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(indexHTML))
+	html := strings.ReplaceAll(indexHTML, "__CONFIG_FILE__", appcontrol.DefaultConfigFile)
+	_, _ = w.Write([]byte(html))
 }
 
 func (s *appServer) handleStatus(w http.ResponseWriter, _ *http.Request) {
@@ -188,7 +189,7 @@ const indexHTML = `<!doctype html>
   <div class="row"><label>Tunnel 3</label><input id="t3" /></div>
   <div class="row"><label>Tunnel 4</label><input id="t4" /></div>
   <div class="row"><label>Tunnel 5</label><input id="t5" /></div>
-  <p>Config import/export file: <code>masterdns-app-config.json</code></p>
+  <p>Config import/export file: <code>__CONFIG_FILE__</code></p>
   <h3>Logs</h3>
   <textarea id="logs" readonly></textarea>
 <script>
